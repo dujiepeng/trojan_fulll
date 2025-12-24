@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0] - 2025-12-24
+### 修复
+- **终极冲突清理：解决 Docker 服务启动失败**：
+    - 增加了对 `/etc/systemd/system/docker.service` 干扰项的强制删除逻辑。之前的手动安装由于在此路径下留下了配置，导致官方安装的 Docker 被屏蔽而无法启动。
+    - 自动清理 `/usr/local/bin/` 下的旧版 Docker 冗余二进制文件，确保系统路径纯净。
+    - 强化了端口与 Socket 权限修复：安装后强制执行 `chmod 666 /var/run/docker.sock`，彻底消除管理程序的权限障碍。
+- **环境自愈**：增加了对 `docker.socket` 的取消屏蔽 (unmask) 逻辑，确保 systemd 链路畅通。
+
 ## [1.1.9] - 2025-12-24
 ### 修复
 - **重大修复：解决 MariaDB 启动检测死循环**：

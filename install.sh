@@ -42,36 +42,37 @@ fix_apt_lock() {
 # 原脚本在安装 Trojan 管理器后会自动调用 docker 安装逻辑，
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
-    # 功能：确保 Docker 守护进程处于运行状态 (官方脚本优先策略)
+    # 功能：确保 Docker 守护进程处于运行状态 (官方脚本 + 强力冲突清理策略)
     check_docker_status() {
         docker info >/dev/null 2>&1
     }
 
-    # 1. 如果已就绪，直接返回
+    # 1. 之前的手动安装可能留下了干扰项，清理冲突 (v1.2.0 核心逻辑)
+    if [[ ! -f /usr/bin/docker ]] || ! check_docker_status; then
+        colorEcho $BLUE ">>> 正在清理可能存在的 Docker 版本冲突与过时配置..."
+        # 停止并清理可能存在的错误服务定义 (之前手动安装遗留的)
+        sudo systemctl stop docker docker.socket 2>/dev/null || true
+        sudo systemctl disable docker docker.socket 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/docker.service 2>/dev/null || true
+        sudo rm -f /etc/systemd/system/docker.socket 2>/dev/null || true
+        
+        # 清理之前手动下载到 /usr/local/bin 的二进制文件
+        sudo rm -f /usr/local/bin/docker* /usr/local/bin/containerd* /usr/local/bin/runc /usr/local/bin/ctr 2>/dev/null || true
+        
+        sudo systemctl daemon-reload
+        sudo systemctl unmask docker.service docker.socket 2>/dev/null || true
+    fi
+
+    # 2. 如果已就绪，直接返回
     if check_docker_status; then
         colorEcho $GREEN "Docker 已就绪并在运行中。"
         return
     fi
 
-    # 2. 尝试启动已存在的 Docker
-    if command -v docker >/dev/null 2>&1; then
-        colorEcho $BLUE ">>> 检测到 Docker 但守护进程未在线，尝试启动..."
-        if command -v systemctl >/dev/null 2>&1; then
-            sudo systemctl unmask docker.socket >/dev/null 2>&1 || true
-            sudo systemctl daemon-reload
-            sudo systemctl start docker >/dev/null 2>&1 || true
-        fi
-        sleep 3
-        if check_docker_status; then
-            colorEcho $GREEN "Docker 运行状态已恢复。"
-            return
-        fi
-    fi
-
-    # 3. 官方脚本安装 (最稳妥，自动处理 Cgroup v2 / IPTables)
-    colorEcho $BLUE ">>> 正在通过官方 get.docker.com 脚本安装/修复 Docker..."
+    # 3. 官方脚本安装 (最稳妥)
+    colorEcho $BLUE ">>> 正在通过官方通道安装/重连 Docker 环境..."
     if ! curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; then
-        colorEcho $YELLOW "官方脚本执行失败，尝试回退到系统包管理器..."
+        colorEcho $YELLOW "官方脚本执行失败，尝试回退到包管理器..."
         if [[ ${package_manager} == 'apt-get' ]]; then
             sudo apt-get update && sudo apt-get install -y docker.io
         elif [[ ${package_manager} == 'yum' || ${package_manager} == 'dnf' ]]; then
@@ -79,13 +80,16 @@ install_docker_fixed() {
         fi
     fi
 
-    # 4. 最终状态验证
+    # 4. 修复权限与启动
+    sudo systemctl enable --now docker 2>/dev/null || true
+    # 强制修正 socket 权限，防止管理程序连接失败
+    [[ -S /var/run/docker.sock ]] && sudo chmod 666 /var/run/docker.sock
+
+    # 5. 最终验证
     colorEcho $BLUE "执行最终状态验证..."
-    for i in {1..5}; do
+    for i in {1..8}; do
         if check_docker_status; then
-            sudo systemctl enable docker >/dev/null 2>&1 || true
-            sudo systemctl start docker >/dev/null 2>&1 || true
-            colorEcho $GREEN "Docker 安装并验证成功。"
+            colorEcho $GREEN "Docker 环境修复并验证成功。"
             return
         fi
         echo -n "."
@@ -93,8 +97,8 @@ install_docker_fixed() {
     done
 
     echo
-    colorEcho $RED "FATAL: 无法启动 Docker 守护进程。MariaDB 将无法运行。"
-    colorEcho $RED "此环境不符合 Trojan 管理器运行要求，安装强制终止。"
+    colorEcho $RED "FATAL: 尽管进行了环境清理与重装，Docker 依然无法启动。"
+    colorEcho $YELLOW "请检查系统日志: journalctl -u docker --no-pager"
     exit 1
 }
 
