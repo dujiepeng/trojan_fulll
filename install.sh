@@ -8,9 +8,11 @@
 set -e
 
 # --- 环境变量与配置 ---
-download_url="https://github.com/Jrohy/trojan/releases/download/"
-version_check="https://api.github.com/repos/Jrohy/trojan/releases/latest"
-service_url="https://raw.githubusercontent.com/Jrohy/trojan/master/asset/trojan-web.service"
+# --- 环境变量与配置 (已本地化到 dujiepeng/trojan_fulll) ---
+# 注意：二进制文件建议手动上传到您仓库的 Releases 中，以下链接需对应修改
+download_url="https://github.com/dujiepeng/trojan_fulll/releases/download/"
+version_check="https://api.github.com/repos/dujiepeng/trojan_fulll/releases/latest"
+service_url="https://raw.githubusercontent.com/dujiepeng/trojan_fulll/main/trojan-web.service"
 package_manager=""
 arch=$(uname -m)
 
