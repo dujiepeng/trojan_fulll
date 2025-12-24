@@ -43,8 +43,31 @@ fix_apt_lock() {
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
     if command -v docker >/dev/null 2>&1; then
-        colorEcho $GREEN "Docker 已存在，跳过安装。"
-        return
+        if docker info >/dev/null 2>&1; then
+            colorEcho $GREEN "Docker 已存在且正在运行，跳过安装。"
+            return
+        fi
+        
+        colorEcho $BLUE ">>> 检测到 Docker 已安装但守护进程未运行，尝试启动..."
+        if [[ `command -v systemctl` ]]; then
+            sudo systemctl daemon-reload
+            sudo systemctl enable docker >/dev/null 2>&1 || true
+            sudo systemctl start docker >/dev/null 2>&1 || true
+        else
+            sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
+        fi
+        
+        # 等待守护进程启动
+        for i in {1..10}; do
+            if docker info >/dev/null 2>&1; then
+                colorEcho $GREEN "Docker 守护进程启动成功。"
+                return
+            fi
+            echo -n "."
+            sleep 2
+        done
+        echo
+        colorEcho $YELLOW "无法自动启动 Docker 守护进程，将尝试重新安装逻辑..."
     fi
 
     colorEcho $BLUE ">>> 正在通过稳定的静态二进制方式预装 Docker..."
