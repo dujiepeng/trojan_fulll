@@ -208,6 +208,15 @@ installTrojanManager() {
     sleep 2
     
     # 运行管理器 (它会检测到 Docker 已安装，从而避免之前的 404 错误路径)
+    # 注入环境变量以增强在 Ubuntu 24.04 (Noble) 下的 Docker API 兼容性
+    export DOCKER_API_VERSION=1.41
+    
+    # 预检：如果 MariaDB 已启动，尝试给出更明确的提示
+    if docker ps --format '{{.Names}}' | grep -q "trojan-mariadb"; then
+        db_port=$(docker port trojan-mariadb 3306 2>/dev/null | cut -d: -f2)
+        colorEcho $GREEN "检测到 MariaDB 容器已在运行 (端口: ${db_port:-未映射})，即将移交控制权给管理器..."
+    fi
+    
     /usr/local/bin/trojan
 }
 
