@@ -42,120 +42,60 @@ fix_apt_lock() {
 # 原脚本在安装 Trojan 管理器后会自动调用 docker 安装逻辑，
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
-    # 功能：确保 Docker 守护进程处于运行状态 (系统包优先策略)
+    # 功能：确保 Docker 守护进程处于运行状态 (官方脚本优先策略)
     check_docker_status() {
         docker info >/dev/null 2>&1
     }
 
-    # 1. 如果已安装且运行，直接返回
+    # 1. 如果已就绪，直接返回
     if check_docker_status; then
         colorEcho $GREEN "Docker 已就绪并在运行中。"
         return
     fi
 
-    # 2. 如果已安装但未运行，尝试启动修复
+    # 2. 尝试启动已存在的 Docker
     if command -v docker >/dev/null 2>&1; then
-        colorEcho $BLUE ">>> 检测到 Docker 但守护进程未在线，尝试启动修复..."
-        
-        # 尝试 systemctl
+        colorEcho $BLUE ">>> 检测到 Docker 但守护进程未在线，尝试启动..."
         if command -v systemctl >/dev/null 2>&1; then
             sudo systemctl unmask docker.socket >/dev/null 2>&1 || true
             sudo systemctl daemon-reload
             sudo systemctl start docker >/dev/null 2>&1 || true
         fi
-        
-        # 针对 Ubuntu/Debian 尝试启动服务
-        if ! check_docker_status && [[ `command -v service` ]]; then
-            sudo service docker start >/dev/null 2>&1 || true
-        fi
-
-        # 等待自愈
-        for i in {1..5}; do
-            if check_docker_status; then
-                colorEcho $GREEN "Docker 运行状态已恢复。"
-                return
-            fi
-            sleep 2
-        done
-    fi
-
-    # 3. 如果未运行或无法启动，尝试通过系统包管理器安装 (最稳妥的方式)
-    colorEcho $BLUE ">>> 尝试通过系统包管理器 (apt/yum) 安装 Docker..."
-    if [[ ${package_manager} == 'apt-get' ]]; then
-        # Ubuntu/Debian 优先安装 docker.io 或 docker-ce
-        if sudo apt-get update && sudo apt-get install -y docker.io; then
-            colorEcho $GREEN "通过 apt-get 安装 Docker 成功。"
-        fi
-    elif [[ ${package_manager} == 'yum' || ${package_manager} == 'dnf' ]]; then
-        if sudo ${package_manager} install -y docker; then
-            colorEcho $GREEN "通过 ${package_manager} 安装 Docker 成功。"
+        sleep 3
+        if check_docker_status; then
+            colorEcho $GREEN "Docker 运行状态已恢复。"
+            return
         fi
     fi
 
-    # 再次验证包管理器安装结果
-    if check_docker_status; then
-        sudo systemctl enable docker >/dev/null 2>&1 || true
-        sudo systemctl start docker >/dev/null 2>&1 || true
-        return
-    fi
-
-    # 4. 极端兜底：静态二进制下载与安装
-    colorEcho $YELLOW "系统包管理器安装失败或环境不兼容，进入静态二进制兜底模式..."
-    DOCKER_VERSION="27.3.1"
-    DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
-    
-    if [[ $arch == "aarch64" ]]; then
-        DOCKER_URL="https://download.docker.com/linux/static/stable/aarch64/docker-${DOCKER_VERSION}.tgz"
-    fi
-
-    colorEcho $BLUE "正在下载静态二进制文件: ${DOCKER_URL}"
-    if ! wget -qO- ${DOCKER_URL} | tar xvfz - --strip-components=1 -C /tmp/; then
-        colorEcho $RED "错误: Docker 二进制文件下载失败。"
-        exit 1
-    fi
-
-    sudo mv /tmp/docker* /usr/local/bin/ 2>/dev/null || true
-    sudo mv /tmp/containerd* /usr/local/bin/ 2>/dev/null || true
-    sudo mv /tmp/runc /usr/local/bin/ 2>/dev/null || true
-    sudo mv /tmp/ctr /usr/local/bin/ 2>/dev/null || true
-    
-    if [[ `command -v systemctl` ]]; then
-        if [[ ! -f /etc/systemd/system/docker.service ]]; then
-            cat <<EOF | sudo tee /etc/systemd/system/docker.service
-[Unit]
-Description=Docker Application Container Engine
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/dockerd
-Restart=on-failure
-
-[Install]
-WantedBy=multi-user.target
-EOF
+    # 3. 官方脚本安装 (最稳妥，自动处理 Cgroup v2 / IPTables)
+    colorEcho $BLUE ">>> 正在通过官方 get.docker.com 脚本安装/修复 Docker..."
+    if ! curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; then
+        colorEcho $YELLOW "官方脚本执行失败，尝试回退到系统包管理器..."
+        if [[ ${package_manager} == 'apt-get' ]]; then
+            sudo apt-get update && sudo apt-get install -y docker.io
+        elif [[ ${package_manager} == 'yum' || ${package_manager} == 'dnf' ]]; then
+            sudo ${package_manager} install -y docker
         fi
-        sudo systemctl daemon-reload
-        sudo systemctl enable docker >/dev/null 2>&1 || true
-        sudo systemctl start docker >/dev/null 2>&1 || true
-    else
-        sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
     fi
 
-    # 5. 最终死亡检查
+    # 4. 最终状态验证
     colorEcho $BLUE "执行最终状态验证..."
-    sleep 5
-    if ! check_docker_status; then
-        echo
-        colorEcho $RED "FATAL: 无论使用系统包还是二进制，Docker 守护进程均无法启动。"
-        if [[ -f /var/log/dockerd.log ]]; then
-            colorEcho $YELLOW "可能的错误原因 (/var/log/dockerd.log):"
-            tail -n 15 /var/log/dockerd.log
+    for i in {1..5}; do
+        if check_docker_status; then
+            sudo systemctl enable docker >/dev/null 2>&1 || true
+            sudo systemctl start docker >/dev/null 2>&1 || true
+            colorEcho $GREEN "Docker 安装并验证成功。"
+            return
         fi
-        colorEcho $RED "此环境不符合 MariaDB 运行要求，安装强制终止。"
-        exit 1
-    fi
-    colorEcho $GREEN "Docker 安装并验证成功。"
+        echo -n "."
+        sleep 3
+    done
+
+    echo
+    colorEcho $RED "FATAL: 无法启动 Docker 守护进程。MariaDB 将无法运行。"
+    colorEcho $RED "此环境不符合 Trojan 管理器运行要求，安装强制终止。"
+    exit 1
 }
 
 # --- 3. 复刻 Jrohy 原脚本核心逻辑 ---
@@ -208,13 +148,15 @@ installTrojanManager() {
     sleep 2
     
     # 运行管理器 (它会检测到 Docker 已安装，从而避免之前的 404 错误路径)
-    # 注入环境变量以增强在 Ubuntu 24.04 (Noble) 下的 Docker API 兼容性
-    export DOCKER_API_VERSION=1.41
+    # 注入环境变量以增强在现代内核下对旧版管理器的 API 兼容性
+    # 强制对齐到 API 1.35 版本
+    export DOCKER_API_VERSION=1.35
     
     # 预检：如果 MariaDB 已启动，尝试给出更明确的提示
     if docker ps --format '{{.Names}}' | grep -q "trojan-mariadb"; then
         db_port=$(docker port trojan-mariadb 3306 2>/dev/null | cut -d: -f2)
-        colorEcho $GREEN "检测到 MariaDB 容器已在运行 (端口: ${db_port:-未映射})，即将移交控制权给管理器..."
+        colorEcho $GREEN "检测到 MariaDB 容器已运行 (端口: ${db_port:-未映射})"
+        colorEcho $BLUE "提示：如果后续管理器依然卡在'启动中'，请确认 docker.sock 权限正常。"
     fi
     
     /usr/local/bin/trojan
@@ -286,9 +228,9 @@ main() {
         1)
             fix_apt_lock
             if [[ `command -v apt-get` ]]; then
-                apt-get update && apt-get install -y socat cron xz-utils curl wget iptables iproute2
+                apt-get update && apt-get install -y socat cron xz-utils curl wget iptables iproute2 mariadb-client
             elif [[ `command -v yum` ]]; then
-                yum install -y socat crontabs xz curl wget iptables
+                yum install -y socat crontabs xz curl wget iptables mariadb
             fi
             install_docker_fixed
             installTrojanManager

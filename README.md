@@ -20,6 +20,6 @@ bash <(curl -sL https://raw.githubusercontent.com/dujiepeng/trojan_fulll/main/in
 3. **完全兼容**：安装完成后，您依然可以使用 `trojan` 命令及其图形化管理面板。
 
 ## 版本信息
-- **版本**: v1.1.8
+- **版本**: v1.1.9
 - **更新时间**: 2025-12-24
 - **修改人**: Antigravity (AI Assistant)
