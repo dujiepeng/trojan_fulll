@@ -110,13 +110,20 @@ installTrojanManager() {
         /tmp/acme.sh --install --home ~/.acme.sh --accountemail "my@example.com"
     fi
 
-    # 获取最新版本
-    lastest_version=$(curl -H 'Cache-Control: no-cache' -s "$version_check" | grep 'tag_name' | cut -d\" -f4)
+    # 获取最新版本 (增加容错逻辑)
+    latest_version=$(curl -H 'Cache-Control: no-cache' -s "$version_check" | grep 'tag_name' | cut -d\" -f4 || echo "")
+    if [ -z "$latest_version" ]; then
+        latest_version="v2.15.3"
+        colorEcho $YELLOW "提示：无法通过 API 获取版本，将执行本地化备份版本 $latest_version"
+    fi
     [[ $arch == x86_64 ]] && bin="trojan-linux-amd64" || bin="trojan-linux-arm64" 
     
-    # 下载到临时文件，然后通过 mv 原子替换（Linux 下 mv 即使目标文件忙也能成功）
-    colorEcho $BLUE "下载中..."
-    curl -L "$download_url/$lastest_version/$bin" -o /usr/local/bin/trojan.new
+    # 优先从您的仓库下载，如果下载失败则尝试从原官方仓库下载 (作为双保险)
+    colorEcho $BLUE "正在下载管理程序 $latest_version 版本..."
+    if ! curl -L "$download_url/$latest_version/$bin" -o /usr/local/bin/trojan.new; then
+        colorEcho $YELLOW "警告：从您的仓库下载失败，尝试从原官方源下载..."
+        curl -L "https://github.com/Jrohy/trojan/releases/download/$latest_version/$bin" -o /usr/local/bin/trojan.new
+    fi
     chmod +x /usr/local/bin/trojan.new
     mv -f /usr/local/bin/trojan.new /usr/local/bin/trojan
     
