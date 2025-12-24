@@ -42,52 +42,70 @@ fix_apt_lock() {
 # 原脚本在安装 Trojan 管理器后会自动调用 docker 安装逻辑，
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
+    # 功能：确保 Docker 守护进程处于运行状态
+    check_docker_status() {
+        docker info >/dev/null 2>&1
+    }
+
     if command -v docker >/dev/null 2>&1; then
-        if docker info >/dev/null 2>&1; then
-            colorEcho $GREEN "Docker 已存在且正在运行，跳过安装。"
+        if check_docker_status; then
+            colorEcho $GREEN "Docker 已存在且正在运行。"
             return
         fi
         
-        colorEcho $BLUE ">>> 检测到 Docker 已安装但守护进程未运行，尝试启动..."
-        if [[ `command -v systemctl` ]]; then
+        colorEcho $BLUE ">>> 检测到 Docker 但守护进程未在线，尝试启动修复..."
+        
+        # 尝试 1: systemctl (常规 apt 安装)
+        if command -v systemctl >/dev/null 2>&1; then
+            sudo systemctl unmask docker.socket >/dev/null 2>&1 || true
             sudo systemctl daemon-reload
-            sudo systemctl enable docker >/dev/null 2>&1 || true
             sudo systemctl start docker >/dev/null 2>&1 || true
-        else
+        fi
+        
+        # 尝试 2: snap (Ubuntu 常见)
+        if ! check_docker_status && command -v snap >/dev/null 2>&1; then
+            sudo snap start docker >/dev/null 2>&1 || true
+        fi
+        
+        # 尝试 3: 直接启动 dockerd
+        if ! check_docker_status; then
             sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
         fi
         
-        # 等待守护进程启动
-        for i in {1..10}; do
-            if docker info >/dev/null 2>&1; then
-                colorEcho $GREEN "Docker 守护进程启动成功。"
+        # 等待自愈
+        colorEcho $BLUE "正在等待 Docker 守护进程自愈 (最多 15 秒)..."
+        for i in {1..8}; do
+            if check_docker_status; then
+                colorEcho $GREEN "Docker 运行状态恢复。"
                 return
             fi
             echo -n "."
             sleep 2
         done
         echo
-        colorEcho $YELLOW "无法自动启动 Docker 守护进程，将尝试重新安装逻辑..."
+        colorEcho $YELLOW "常规启动尝试失败，将进入静态二进制重装模式..."
     fi
 
-    colorEcho $BLUE ">>> 正在通过稳定的静态二进制方式预装 Docker..."
+    # 尝试 4: 静态二进制安装逻辑 (作为最后手段)
+    colorEcho $BLUE ">>> 正在通过稳定的静态二进制方式预装/覆盖安装 Docker..."
     DOCKER_VERSION="27.3.1"
     DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
     
-    # 根据架构调整下载地址 (原脚本支持 arm64)
     if [[ $arch == "aarch64" ]]; then
         DOCKER_URL="https://download.docker.com/linux/static/stable/aarch64/docker-${DOCKER_VERSION}.tgz"
     fi
 
-    wget -qO- ${DOCKER_URL} | tar xvfz - --strip-components=1 -C /tmp/
+    if ! wget -qO- ${DOCKER_URL} | tar xvfz - --strip-components=1 -C /tmp/; then
+        colorEcho $RED "错误: Docker 二进制文件下载失败，请检查网络。"
+        exit 1
+    fi
+
     sudo mv /tmp/docker* /usr/local/bin/ 2>/dev/null || true
     sudo mv /tmp/containerd* /usr/local/bin/ 2>/dev/null || true
     sudo mv /tmp/runc /usr/local/bin/ 2>/dev/null || true
     sudo mv /tmp/ctr /usr/local/bin/ 2>/dev/null || true
     
-    # 启动 Docker 服务
     if [[ `command -v systemctl` ]]; then
-        # 创建一个简单的 docker service 如果没有的话
         if [[ ! -f /etc/systemd/system/docker.service ]]; then
             cat <<EOF | sudo tee /etc/systemd/system/docker.service
 [Unit]
@@ -102,14 +120,25 @@ Restart=on-failure
 [Install]
 WantedBy=multi-user.target
 EOF
-            sudo systemctl daemon-reload
-            sudo systemctl enable docker
-            sudo systemctl start docker
         fi
+        sudo systemctl daemon-reload
+        sudo systemctl enable docker >/dev/null 2>&1 || true
+        sudo systemctl start docker >/dev/null 2>&1 || true
     else
         sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
     fi
-    colorEcho $GREEN "Docker 预装完成并已启动。"
+
+    # 最终检查 (强制性)
+    colorEcho $BLUE "执行最终状态验证..."
+    sleep 3
+    if ! check_docker_status; then
+        echo
+        colorEcho $RED "FATAL: 无法连接至 Docker 守护进程。MariaDB 将无法安装。"
+        colorEcho $RED "请检查: 1. /var/log/dockerd.log (如果是直接启动) 2. journalctl -u docker"
+        colorEcho $RED "出于系统安全，脚本将停止，不再进入安装循环。"
+        exit 1
+    fi
+    colorEcho $GREEN "Docker 预装/配置完成并验证成功。"
 }
 
 # --- 3. 复刻 Jrohy 原脚本核心逻辑 ---
