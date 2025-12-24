@@ -134,8 +134,12 @@ EOF
     if ! check_docker_status; then
         echo
         colorEcho $RED "FATAL: 无法连接至 Docker 守护进程。MariaDB 将无法安装。"
-        colorEcho $RED "请检查: 1. /var/log/dockerd.log (如果是直接启动) 2. journalctl -u docker"
-        colorEcho $RED "出于系统安全，脚本将停止，不再进入安装循环。"
+        if [[ -f /var/log/dockerd.log ]]; then
+            colorEcho $YELLOW "以下是 /var/log/dockerd.log 的最后 20 行，可用于排查原因:"
+            tail -n 20 /var/log/dockerd.log
+        fi
+        colorEcho $RED "请根据上述日志或运行 'journalctl -u docker' 检查原因。"
+        colorEcho $RED "由于 Docker 状态异常，脚本将强制停止，避免进入安装循环。"
         exit 1
     fi
     colorEcho $GREEN "Docker 预装/配置完成并验证成功。"
@@ -260,9 +264,9 @@ main() {
         1)
             fix_apt_lock
             if [[ `command -v apt-get` ]]; then
-                apt-get update && apt-get install -y socat cron xz-utils curl wget
+                apt-get update && apt-get install -y socat cron xz-utils curl wget iptables iproute2
             elif [[ `command -v yum` ]]; then
-                yum install -y socat crontabs xz curl wget
+                yum install -y socat crontabs xz curl wget iptables
             fi
             install_docker_fixed
             installTrojanManager
