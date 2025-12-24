@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1] - 2025-12-24
+### 修复
+- **紧急：Docker 环境核能级重置 (Nuclear Cleanup)**：
+    - 针对 `docker.service loaded failed` 的顽固故障，升级了清理逻辑：全量 `purge` 所有相关的 apt 冲突包，并强制删除 `/etc/systemd/system/` 和 `/lib/systemd/system/` 目录下所有可能存在的 Docker Stub。
+    - 增加了对 `snap` 版 Docker 的强制卸载，排除所有容器运行时的潜在竞争。
+    - **故障透传**：在安装失败的 `FATAL` 环节增加了 `journalctl -u docker` 日志的强制回显输出，确保能抓取到环境底层的真实报错原因。
+
 ## [1.2.0] - 2025-12-24
 ### 修复
 - **终极冲突清理：解决 Docker 服务启动失败**：
