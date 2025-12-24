@@ -94,16 +94,20 @@ installTrojanManager() {
     systemctl stop trojan-web 2>/dev/null || true
     systemctl stop trojan 2>/dev/null || true
     
+    # 彻底清理可能占用该文件的进程
+    if command -v fuser >/dev/null 2>&1; then
+        fuser -k /usr/local/bin/trojan 2>/dev/null || true
+    fi
+    
     # 获取最新版本
     lastest_version=$(curl -H 'Cache-Control: no-cache' -s "$version_check" | grep 'tag_name' | cut -d\" -f4)
     [[ $arch == x86_64 ]] && bin="trojan-linux-amd64" || bin="trojan-linux-arm64" 
     
-    # 尝试删除旧文件或重命名，避免 Text file busy
-    rm -f /usr/local/bin/trojan 2>/dev/null || mv /usr/local/bin/trojan /usr/local/bin/trojan.bak 2>/dev/null || true
-    
-    # 下载管理程序
-    curl -L "$download_url/$lastest_version/$bin" -o /usr/local/bin/trojan
-    chmod +x /usr/local/bin/trojan
+    # 下载到临时文件，然后通过 mv 原子替换（Linux 下 mv 即使目标文件忙也能成功）
+    colorEcho $BLUE "下载中..."
+    curl -L "$download_url/$lastest_version/$bin" -o /usr/local/bin/trojan.new
+    chmod +x /usr/local/bin/trojan.new
+    mv -f /usr/local/bin/trojan.new /usr/local/bin/trojan
     
     # 安装服务
     if [[ ! -e /etc/systemd/system/trojan-web.service ]]; then
