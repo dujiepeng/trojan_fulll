@@ -42,78 +42,41 @@ fix_apt_lock() {
 # 原脚本在安装 Trojan 管理器后会自动调用 docker 安装逻辑，
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
-    # 功能：扫清一切障碍并拉起 Docker (核能级重置策略 v1.2.1)
+    # 功能：确保 Docker 处于运行状态 (回归原生策略 v1.2.2)
+    # 相比之前的版本，此版本移除了复杂的清理和静态安装，完全信赖系统包管理器
     check_docker_status() {
         docker info >/dev/null 2>&1
     }
 
     # 1. 如果已就绪，直接返回
     if check_docker_status; then
-        colorEcho $GREEN "Docker 已就绪并在运行中。"
+        colorEcho $GREEN "Docker 环境已就绪。"
         return
     fi
 
-    # 2. 深度清理逻辑：解决 "Loaded Failed" 顽疾
-    colorEcho $BLUE ">>> 正在执行 Docker 环境核能级扫除 (解决服务加载冲突)..."
-    
-    # 停止所有可能的服务
-    sudo systemctl stop docker docker.socket 2>/dev/null || true
-    sudo systemctl disable docker docker.socket 2>/dev/null || true
-    
-    # 全量 purge 卸载冲突包
-    if [[ ${package_manager} == 'apt-get' ]]; then
-        sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker.io docker-doc docker-compose-v2 podman-docker containerd runc 2>/dev/null || true
-        sudo apt-get autoremove -y 2>/dev/null || true
-    fi
-
-    # 卸载可能存在的 Snap 版本
-    if command -v snap >/dev/null 2>&1; then
-        sudo snap remove docker 2>/dev/null || true
-    fi
-
-    # 物理抹除所有 Service 文件与冲突 Stub
-    colorEcho $BLUE "正在抹除残留的 systemd 配置文件..."
-    sudo rm -rf /etc/systemd/system/docker.service* 2>/dev/null || true
-    sudo rm -rf /etc/systemd/system/docker.socket* 2>/dev/null || true
-    sudo rm -rf /lib/systemd/system/docker.service* 2>/dev/null || true
-    sudo rm -rf /lib/systemd/system/docker.socket* 2>/dev/null || true
-    sudo rm -f /var/run/docker.sock 2>/dev/null || true
-    
-    # 清理二进制残留
-    sudo rm -f /usr/local/bin/docker* /usr/local/bin/containerd* /usr/local/bin/runc /usr/local/bin/ctr 2>/dev/null || true
-    sudo rm -f /usr/bin/docker* /usr/bin/containerd* /usr/bin/runc /usr/bin/ctr 2>/dev/null || true
-    
+    # 2. 清除干扰：仅删除之前版本可能留下的手动配置文件
+    sudo systemctl stop docker 2>/dev/null || true
+    sudo rm -f /etc/systemd/system/docker.service 2>/dev/null || true
     sudo systemctl daemon-reload
-    sudo systemctl reset-failed 2>/dev/null || true
 
-    # 3. 官方脚本纯净安装
-    colorEcho $BLUE ">>> 正在通过官方通道重新拉起纯净版 Docker..."
-    if ! curl -fsSL https://get.docker.com | sh -s -- --mirror Aliyun; then
-        colorEcho $RED "官方安装脚本执行失败，由于环境异常，安装无法继续。"
-        exit 1
+    # 3. 使用原生方式安装/修复
+    colorEcho $BLUE ">>> 正在通过系统原生方式准备 Docker 环境..."
+    if [[ ${package_manager} == 'apt-get' ]]; then
+        sudo apt-get update && sudo apt-get install -y docker.io
+    elif [[ ${package_manager} == 'yum' || ${package_manager} == 'dnf' ]]; then
+        sudo ${package_manager} install -y docker
     fi
 
-    # 4. 强制权限修正与自愈启动
-    sudo systemctl unmask docker.service docker.socket 2>/dev/null || true
+    # 4. 启动与验证
+    sudo systemctl unmask docker.service 2>/dev/null || true
     sudo systemctl enable --now docker 2>/dev/null || true
     [[ -S /var/run/docker.sock ]] && sudo chmod 666 /var/run/docker.sock
 
-    # 5. 最终验证与强回显
-    colorEcho $BLUE "执行环境自愈验证..."
-    for i in {1..8}; do
-        if check_docker_status; then
-            colorEcho $GREEN "Docker 环境核能重置成功！"
-            return
-        fi
-        echo -n "."
-        sleep 3
-    done
-
-    echo
-    colorEcho $RED "FATAL: 全量重置后 Docker 依然无法启动。"
-    colorEcho $YELLOW ">>> 以下是 journalctl -u docker 的最后 20 行日志，用于终极排查:"
-    sudo journalctl -u docker --no-pager -n 20
-    exit 1
+    if check_docker_status; then
+        colorEcho $GREEN "Docker 恢复成功。"
+    else
+        colorEcho $YELLOW "警告: 基础尝试后 Docker 仍未连接，尝试由管理器内部逻辑自愈..."
+    fi
 }
 
 # --- 3. 复刻 Jrohy 原脚本核心逻辑 ---
