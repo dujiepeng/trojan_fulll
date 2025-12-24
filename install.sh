@@ -107,7 +107,8 @@ installTrojanManager() {
         colorEcho $BLUE ">>> 正在预装 acme.sh..."
         curl -L $acme_url -o /tmp/acme.sh
         chmod +x /tmp/acme.sh
-        /tmp/acme.sh --install --home ~/.acme.sh --accountemail "my@example.com"
+        # 修复安装失败问题：进入 /tmp 目录执行安装，确保 acme.sh 能定位到自身完成复制
+        (cd /tmp && ./acme.sh --install --home ~/.acme.sh --accountemail "my@example.com")
     fi
 
     # 获取最新版本 (增加容错逻辑)
