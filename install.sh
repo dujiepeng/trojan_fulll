@@ -42,52 +42,65 @@ fix_apt_lock() {
 # 原脚本在安装 Trojan 管理器后会自动调用 docker 安装逻辑，
 # 如果我们提前以正确的方式安装好 Docker，管理器就不会再尝试下载那个失效的 404 链接。
 install_docker_fixed() {
-    # 功能：确保 Docker 守护进程处于运行状态
+    # 功能：确保 Docker 守护进程处于运行状态 (系统包优先策略)
     check_docker_status() {
         docker info >/dev/null 2>&1
     }
 
+    # 1. 如果已安装且运行，直接返回
+    if check_docker_status; then
+        colorEcho $GREEN "Docker 已就绪并在运行中。"
+        return
+    fi
+
+    # 2. 如果已安装但未运行，尝试启动修复
     if command -v docker >/dev/null 2>&1; then
-        if check_docker_status; then
-            colorEcho $GREEN "Docker 已存在且正在运行。"
-            return
-        fi
-        
         colorEcho $BLUE ">>> 检测到 Docker 但守护进程未在线，尝试启动修复..."
         
-        # 尝试 1: systemctl (常规 apt 安装)
+        # 尝试 systemctl
         if command -v systemctl >/dev/null 2>&1; then
             sudo systemctl unmask docker.socket >/dev/null 2>&1 || true
             sudo systemctl daemon-reload
             sudo systemctl start docker >/dev/null 2>&1 || true
         fi
         
-        # 尝试 2: snap (Ubuntu 常见)
-        if ! check_docker_status && command -v snap >/dev/null 2>&1; then
-            sudo snap start docker >/dev/null 2>&1 || true
+        # 针对 Ubuntu/Debian 尝试启动服务
+        if ! check_docker_status && [[ `command -v service` ]]; then
+            sudo service docker start >/dev/null 2>&1 || true
         fi
-        
-        # 尝试 3: 直接启动 dockerd
-        if ! check_docker_status; then
-            sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
-        fi
-        
+
         # 等待自愈
-        colorEcho $BLUE "正在等待 Docker 守护进程自愈 (最多 15 秒)..."
-        for i in {1..8}; do
+        for i in {1..5}; do
             if check_docker_status; then
-                colorEcho $GREEN "Docker 运行状态恢复。"
+                colorEcho $GREEN "Docker 运行状态已恢复。"
                 return
             fi
-            echo -n "."
             sleep 2
         done
-        echo
-        colorEcho $YELLOW "常规启动尝试失败，将进入静态二进制重装模式..."
     fi
 
-    # 尝试 4: 静态二进制安装逻辑 (作为最后手段)
-    colorEcho $BLUE ">>> 正在通过稳定的静态二进制方式预装/覆盖安装 Docker..."
+    # 3. 如果未运行或无法启动，尝试通过系统包管理器安装 (最稳妥的方式)
+    colorEcho $BLUE ">>> 尝试通过系统包管理器 (apt/yum) 安装 Docker..."
+    if [[ ${package_manager} == 'apt-get' ]]; then
+        # Ubuntu/Debian 优先安装 docker.io 或 docker-ce
+        if sudo apt-get update && sudo apt-get install -y docker.io; then
+            colorEcho $GREEN "通过 apt-get 安装 Docker 成功。"
+        fi
+    elif [[ ${package_manager} == 'yum' || ${package_manager} == 'dnf' ]]; then
+        if sudo ${package_manager} install -y docker; then
+            colorEcho $GREEN "通过 ${package_manager} 安装 Docker 成功。"
+        fi
+    fi
+
+    # 再次验证包管理器安装结果
+    if check_docker_status; then
+        sudo systemctl enable docker >/dev/null 2>&1 || true
+        sudo systemctl start docker >/dev/null 2>&1 || true
+        return
+    fi
+
+    # 4. 极端兜底：静态二进制下载与安装
+    colorEcho $YELLOW "系统包管理器安装失败或环境不兼容，进入静态二进制兜底模式..."
     DOCKER_VERSION="27.3.1"
     DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
     
@@ -95,8 +108,9 @@ install_docker_fixed() {
         DOCKER_URL="https://download.docker.com/linux/static/stable/aarch64/docker-${DOCKER_VERSION}.tgz"
     fi
 
+    colorEcho $BLUE "正在下载静态二进制文件: ${DOCKER_URL}"
     if ! wget -qO- ${DOCKER_URL} | tar xvfz - --strip-components=1 -C /tmp/; then
-        colorEcho $RED "错误: Docker 二进制文件下载失败，请检查网络。"
+        colorEcho $RED "错误: Docker 二进制文件下载失败。"
         exit 1
     fi
 
@@ -128,21 +142,20 @@ EOF
         sudo /usr/local/bin/dockerd > /var/log/dockerd.log 2>&1 &
     fi
 
-    # 最终检查 (强制性)
+    # 5. 最终死亡检查
     colorEcho $BLUE "执行最终状态验证..."
-    sleep 3
+    sleep 5
     if ! check_docker_status; then
         echo
-        colorEcho $RED "FATAL: 无法连接至 Docker 守护进程。MariaDB 将无法安装。"
+        colorEcho $RED "FATAL: 无论使用系统包还是二进制，Docker 守护进程均无法启动。"
         if [[ -f /var/log/dockerd.log ]]; then
-            colorEcho $YELLOW "以下是 /var/log/dockerd.log 的最后 20 行，可用于排查原因:"
-            tail -n 20 /var/log/dockerd.log
+            colorEcho $YELLOW "可能的错误原因 (/var/log/dockerd.log):"
+            tail -n 15 /var/log/dockerd.log
         fi
-        colorEcho $RED "请根据上述日志或运行 'journalctl -u docker' 检查原因。"
-        colorEcho $RED "由于 Docker 状态异常，脚本将强制停止，避免进入安装循环。"
+        colorEcho $RED "此环境不符合 MariaDB 运行要求，安装强制终止。"
         exit 1
     fi
-    colorEcho $GREEN "Docker 预装/配置完成并验证成功。"
+    colorEcho $GREEN "Docker 安装并验证成功。"
 }
 
 # --- 3. 复刻 Jrohy 原脚本核心逻辑 ---
