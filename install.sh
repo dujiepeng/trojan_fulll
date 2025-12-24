@@ -90,9 +90,16 @@ EOF
 installTrojanManager() {
     colorEcho $BLUE ">>> 正在按原脚本逻辑安装 Trojan 管理程序..."
     
+    # 停止可能正在运行的服务，防止二进制文件忙
+    systemctl stop trojan-web 2>/dev/null || true
+    systemctl stop trojan 2>/dev/null || true
+    
     # 获取最新版本
     lastest_version=$(curl -H 'Cache-Control: no-cache' -s "$version_check" | grep 'tag_name' | cut -d\" -f4)
     [[ $arch == x86_64 ]] && bin="trojan-linux-amd64" || bin="trojan-linux-arm64" 
+    
+    # 尝试删除旧文件或重命名，避免 Text file busy
+    rm -f /usr/local/bin/trojan 2>/dev/null || mv /usr/local/bin/trojan /usr/local/bin/trojan.bak 2>/dev/null || true
     
     # 下载管理程序
     curl -L "$download_url/$lastest_version/$bin" -o /usr/local/bin/trojan
