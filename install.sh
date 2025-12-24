@@ -105,10 +105,9 @@ installTrojanManager() {
     # 预装 acme.sh (防止管理器在运行时从失效的源下载)
     if [[ ! -e ~/.acme.sh/acme.sh ]]; then
         colorEcho $BLUE ">>> 正在预装 acme.sh..."
-        curl -L $acme_url -o /tmp/acme.sh
-        chmod +x /tmp/acme.sh
-        # 修复安装失败问题：进入 /tmp 目录执行安装，确保 acme.sh 能定位到自身完成复制
-        (cd /tmp && ./acme.sh --install --home ~/.acme.sh --accountemail "my@example.com")
+        # 修复安装失败问题：使用官方推荐的 pipe-to-shell 配合 --install-online 模式
+        # 这会自动处理源码下载和路径定位，彻底解决 "cannot stat 'acme.sh'" 报错
+        curl -sL $acme_url | sh -s -- --install-online --accountemail "my@example.com"
     fi
 
     # 获取最新版本 (增加容错逻辑)
