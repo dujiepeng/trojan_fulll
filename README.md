@@ -2,14 +2,17 @@
 
 本仓库提供了一个修复版的 Trojan 安装脚本，解决了原 `Jrohy/trojan` 脚本在安装过程中遇到的 APT 锁占用及 Docker 静态二进制文件下载 404 的问题。
 
-## 快速安装方式
+## 卸载与全量清理
 
-在您的服务器上执行以下命令即可开始安装：
+脚本现在支持交互式菜单，您可以运行脚本并选择相应的选项：
+- **普通卸载**：停止并删除 Trojan 服务及管理程序，保留 Docker 环境。
+- **全量卸载**：彻底删除 Trojan、Docker 容器、Docker 镜像、Docker 二进制文件以及所有相关数据（包括证书）。
 
+运行命令：
 ```bash
-# 执行修复版 Trojan 安装脚本
 bash <(curl -sL https://raw.githubusercontent.com/dujiepeng/trojan_fulll/main/install.sh)
 ```
+并在菜单中选择 `2` 或 `3`。
 
 ## 修复说明
 1. **自动清理 APT 锁**：脚本启动时会自动检查并清理 `/var/lib/dpkg/lock-frontend` 等锁定文件。

@@ -124,21 +124,93 @@ installTrojanManager() {
     /usr/local/bin/trojan
 }
 
+# --- 4. 卸载功能 ---
+removeTrojan() {
+    colorEcho $BLUE "正在进行普通卸载..."
+    
+    # 停止并禁用服务
+    systemctl stop trojan-web trojan 2>/dev/null || true
+    systemctl disable trojan-web trojan 2>/dev/null || true
+    
+    # 删除二进制文件和系统服务
+    rm -f /usr/local/bin/trojan /usr/local/bin/trojan.new /usr/local/bin/trojan.bak 2>/dev/null
+    rm -f /etc/systemd/system/trojan-web.service /etc/systemd/system/trojan.service 2>/dev/null
+    systemctl daemon-reload
+    
+    # 删除配置
+    rm -rf /usr/local/etc/trojan 2>/dev/null
+    
+    colorEcho $GREEN "普通卸载完成。"
+}
+
+fullRemoveTrojan() {
+    colorEcho $RED "警告：正在进行全量卸载，将删除 Docker 及其所有数据！"
+    sleep 2
+    
+    # 执行普通卸载
+    removeTrojan
+    
+    # 停止并移除所有容器
+    if command -v docker >/dev/null 2>&1; then
+        colorEcho $BLUE "清理 Docker 容器与数据..."
+        docker stop $(docker ps -aq) 2>/dev/null || true
+        docker rm $(docker ps -aq) 2>/dev/null || true
+        
+        # 停止 Docker 服务
+        systemctl stop docker 2>/dev/null || true
+        systemctl disable docker 2>/dev/null || true
+        
+        # 删除 Docker 数据和二进制
+        rm -rf /var/lib/docker /etc/docker 2>/dev/null
+        rm -rf /var/run/docker.sock 2>/dev/null
+        rm -f /usr/local/bin/docker* /usr/local/bin/containerd* /usr/local/bin/runc /usr/local/bin/ctr 2>/dev/null
+    fi
+    
+    # 清理 acme.sh
+    rm -rf ~/.acme.sh 2>/dev/null
+    
+    colorEcho $GREEN "全量卸载完成。"
+}
+
 main() {
     # 权限检查
     [ $(id -u) != "0" ] && { colorEcho $RED "错误: 必须以 root 权限运行"; exit 1; }
     
-    fix_apt_lock
-    
-    # 安装依赖
-    if [[ `command -v apt-get` ]]; then
-        apt-get update && apt-get install -y socat cron xz-utils curl wget
-    elif [[ `command -v yum` ]]; then
-        yum install -y socat crontabs xz curl wget
-    fi
-
-    install_docker_fixed
-    installTrojanManager
+    echo -e "
+  ${BLUE}Trojan 增强安装脚本 (Fixed Edition)${NC}
+  ---------------------------------
+  ${GREEN}1.${NC} 安装/更新 Trojan (修复 Docker 404)
+  ${GREEN}2.${NC} 普通卸载 (保留 Docker)
+  ${GREEN}3.${NC} 全量卸载 (清理 Docker 及所有数据)
+  ${GREEN}0.${NC} 退出
+  ---------------------------------
+    "
+    read -p "请输入数字选择 [0-3]: " choice
+    case $choice in
+        1)
+            fix_apt_lock
+            if [[ `command -v apt-get` ]]; then
+                apt-get update && apt-get install -y socat cron xz-utils curl wget
+            elif [[ `command -v yum` ]]; then
+                yum install -y socat crontabs xz curl wget
+            fi
+            install_docker_fixed
+            installTrojanManager
+            ;;
+        2)
+            removeTrojan
+            ;;
+        3)
+            fullRemoveTrojan
+            ;;
+        0)
+            exit 0
+            ;;
+        *)
+            colorEcho $RED "无效选择，退出。"
+            exit 1
+            ;;
+    esac
 }
 
 main
