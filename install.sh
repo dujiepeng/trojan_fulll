@@ -48,11 +48,16 @@ install_docker_fixed() {
 
     colorEcho $BLUE ">>> 正在通过稳定的静态二进制方式预装 Docker..."
     DOCKER_VERSION="27.3.1"
-    DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
+    # 资源本地化：建议将 docker 压缩包也上传到您的 Release 中，以下链接可保持一致性
+    DOCKER_URL="${download_url}${DOCKER_VERSION}/docker-${DOCKER_VERSION}.tgz"
     
-    # 根据架构调整下载地址 (原脚本支持 arm64)
-    if [[ $arch == "aarch64" ]]; then
-        DOCKER_URL="https://download.docker.com/linux/static/stable/aarch64/docker-${DOCKER_VERSION}.tgz"
+    # 检查本地 Release 中是否有 Docker 包，如果没有则回退到官方下载 (为了平滑过渡)
+    if ! wget --spider ${DOCKER_URL} 2>/dev/null; then
+        colorEcho $YELLOW "提示：未在您的 Release 中找到 Docker 包，将从官方源下载..."
+        DOCKER_URL="https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_VERSION}.tgz"
+        if [[ $arch == "aarch64" ]]; then
+            DOCKER_URL="https://download.docker.com/linux/static/stable/aarch64/docker-${DOCKER_VERSION}.tgz"
+        fi
     fi
 
     wget -qO- ${DOCKER_URL} | tar xvfz - --strip-components=1 -C /tmp/
